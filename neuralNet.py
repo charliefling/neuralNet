@@ -23,7 +23,7 @@ class NeuralNet :
                        HIDDEN_DIM_2 = None, HIDDEN_DIM_3 = None, HIDDEN_DIM_1 = None,
                        BATCH_SIZE   = None, EPOCHS       = 1000, DROPOUT      = 0.2,
                        ACTIVATION   = layers.ELU(alpha = 0.1),  LEARNING_RATE = 0.01,
-                       METRICS      = ['mae', 'mse']
+                       METRICS      = ['mae', 'mse'],            REGULARIZER  = None
                        ):
 
 
@@ -43,6 +43,7 @@ class NeuralNet :
         self.metrics        = METRICS
         self.model_datetime = datetime.now().strftime('%d-%mT%H-%M-%S')
         self.data_used      = ''
+        self.regularizers   = REGULARIZER
 
 
 
@@ -57,33 +58,57 @@ class NeuralNet :
         """
         self.model = models.Sequential()
 
-        self.model.add(layers.Dense(
-                  self.hidden_dim_1, input_dim = self.input_dim,
-                  kernel_initializer = initializers.RandomNormal(seed = 1),
-                  bias_initializer   = initializers.Constant(0.01),
-                  kernel_regularizer=regularizers.l2(0.0005)))
+
+        if self.regularizers != None:
+            self.model.add(layers.Dense(
+                      self.hidden_dim_1, input_dim = self.input_dim,
+                      kernel_initializer = initializers.glorot_normal(),
+                      bias_initializer   = initializers.Constant(0.0),
+                      kernel_regularizer= self.regularizers))
+        else:
+            self.model.add(layers.Dense(
+                      self.hidden_dim_1, input_dim = self.input_dim,
+                      kernel_initializer = initializers.glorot_normal(),
+                      bias_initializer   = initializers.Constant(0.0)))
+
 
         self.model.add(self.activation)
         self.model.add(layers.Dropout(self.dropout))
 
+
         if self.hidden_dim_2 != None:
-            self.model.add(layers.Dense(self.hidden_dim_2, kernel_regularizer=regularizers.l2(0.0005)))
+            if self.regularizers != None:
+                self.model.add(layers.Dense(self.hidden_dim_2, kernel_regularizer= self.regularizers))
+            else:
+                self.model.add(layers.Dense(self.hidden_dim_2))
+
+
             self.model.add(self.activation)
             self.model.add(layers.Dropout(self.dropout))
+
 
 
         if self.hidden_dim_3 != None:
-            self.model.add(layers.Dense(self.hidden_dim_3))
+            if self.regularizers != None:
+                self.model.add(layers.Dense(self.hidden_dim_3, kernel_regularizer =self.regularizers))
+
+            else:
+                self.model.add(layers.Dense(self.hidden_dim_3))
+
+
             self.model.add(self.activation)
             self.model.add(layers.Dropout(self.dropout))
+
 
         self.model.add(layers.Dense(self.output_dim))
         self.model.compile(loss = self.loss, optimizer = self.optimizer, metrics = self.metrics)
 
 
+
         self.weights = self.model.get_weights()
 
         print('Model Created')
+
         return self.model
 
 
@@ -96,10 +121,10 @@ class NeuralNet :
         Adds callbacks to keras model. Set value to 1 to activate
 
           reduce_lr : reduces learning rate by a factor of 10 for plateau in
-                      validation loss with patience of 100 epochs
+                      validation loss with patience of 75 epochs
 
          early_stop : stops model training for plateau in validation loss with
-                      patience of 200 epochs
+                      patience of 150 epochs
 
         tensorboard : writes a log to subdirectory path +/logs for visualisation of
                       model learning. More info :
@@ -112,13 +137,13 @@ class NeuralNet :
 
         if reduce_lr == 1:
             reduce_lr = callbacks.ReduceLROnPlateau(monitor = 'val_loss',
-                                                    factor = 0.3, patience = 50,
+                                                    factor = 0.3, patience = 75,
                                                     min_lr = 10**-4)
             self.callbacks_list.append(reduce_lr)
 
         if early_stop == 1:
             early_stop = callbacks.EarlyStopping (monitor = 'val_loss',
-                                                  patience = 100,
+                                                  patience = 150,
                                                   restore_best_weights = True)
             self.callbacks_list.append(early_stop)
 
@@ -145,7 +170,7 @@ class NeuralNet :
 
 
 
-    def fit(self, x_training, y_training, x_testing, y_testing):
+    def fit(self, x_training, y_training, x_testing = None, y_testing = None, verbose = 2):
         """
         Trains the model for training set x_training, y_training
         and validates on x_testing, y_testing
@@ -153,12 +178,23 @@ class NeuralNet :
         Updates keras model and history objects
 
         """
-        start = time()
-        self.history = self.model.fit(x_training, y_training,
-                            epochs = self.epochs , batch_size = self.batch_size,
-                            verbose = 2, validation_data = (x_testing, y_testing),
-                            callbacks = self.callbacks_list, shuffle = True
-                            )
+
+        if (x_testing is None or y_testing is None):
+            start = time()
+            self.history = self.model.fit(x_training, y_training,
+                                epochs = self.epochs , batch_size = self.batch_size,
+                                verbose = verbose, callbacks = self.callbacks_list,
+                                shuffle = True
+                                )
+        else:
+
+            start = time()
+            self.history = self.model.fit(x_training, y_training,
+                                epochs = self.epochs , batch_size = self.batch_size,
+                                verbose = verbose, validation_data = (x_testing, y_testing),
+                                callbacks = self.callbacks_list, shuffle = True
+                                )
+
         end = time()
 
         self.time_to_fit = end - start
@@ -176,11 +212,19 @@ class NeuralNet :
 
 
         """
-        self.y_values    = y_testing
-        self.accuracy    = self.model.evaluate(x_testing,y_testing)
-        self.predictions = self.model.predict(x_testing)
+        self.expected_outputs    = y_testing
+        self.accuracy            = self.model.evaluate(x_testing,y_testing)
+        self.predictions         = self.model.predict(x_testing)
 
 
+        return
+
+
+
+    def save_best_network(self):
+        """
+
+        """
         return
 
 
@@ -204,13 +248,13 @@ class NeuralNet :
             if not os.path.exists(path):
                 os.makedirs(path)
 
-        np.savetxt(path + '/y_values.txt',   self.y_values , delimiter = " ")
-        np.savetxt(path + '/predictions.txt',self.predictions , delimiter = " ")
-        np.savetxt(path + '/loss.txt',       self.history.history['loss'] , delimiter = " ")
-        np.savetxt(path + '/val_loss.txt',   self.history.history['val_loss'] , delimiter = " ")
-        np.savetxt(path + '/mae.txt',        self.history.history['mean_absolute_error'] , delimiter = " ")
-        np.savetxt(path + '/val_mae.txt',    self.history.history['val_mean_absolute_error'] , delimiter = " ")
-        np.savetxt(path + '/lr.txt',         self.history.history['lr'] , delimiter = " ")
+        np.savetxt(path + '/expected_outputs.txt', self.expected_outputs , delimiter = " ")
+        np.savetxt(path + '/predictions.txt',  self.predictions , delimiter = " ")
+        np.savetxt(path + '/loss.txt',         self.history.history['loss'] , delimiter = " ")
+        np.savetxt(path + '/val_loss.txt',     self.history.history['val_loss'] , delimiter = " ")
+        np.savetxt(path + '/mae.txt',          self.history.history['mean_absolute_error'] , delimiter = " ")
+        np.savetxt(path + '/val_mae.txt',      self.history.history['val_mean_absolute_error'] , delimiter = " ")
+        np.savetxt(path + '/lr.txt',           self.history.history['lr'] , delimiter = " ")
 
 
         parameter_file = path+'/model_description.txt'
@@ -226,7 +270,7 @@ class NeuralNet :
         file.write('      EPOCHS  : ' + str(len(self.history.history['loss']))+ '\n')
         file.write('  TIME_TO_FIT : ' + str(self.time_to_fit)  + '\n')
         file.write('      VAL_MSE : ' + str(self.accuracy[2])  + '\n')
-        file.write('      VAL_MAE : ' +  str(self.accuracy[1]) + '\n')
+        file.write('      VAL_MAE : ' + str(self.accuracy[1]) + '\n')
         file.close()
 
         return
@@ -239,15 +283,17 @@ class NeuralNet :
         """
         Produces/saves .png of expected/predicted parameters
 
+
+
         """
         axis_x = [r'$\mathit{f}_{\ast,true}$', r'$V_{circ,true}$',r'$\mathit{f}_{X,true}$', r'$\tau_{CMB,true}$' ]
         axis_y = [r'$\mathit{f}_{\ast,pred}$', r'$V_{circ,pred}$',r'$\mathit{f}_{X,pred}$', r'$\tau_{CMB,pred}$' ]
 
         fig = plt.figure(figsize = (800/50, 800/96), dpi = 96)
 
-        for i in range(len(self.y_values[0])):
+        for i in range(len(self.expected_outputs[0])):
 
-            x = list(map(list, zip(*self.y_values)))[i]
+            x = list(map(list, zip(*self.expected_outputs)))[i]
             y = list(map(list, zip(*self.predictions)))[i]
 
             ax = plt.subplot(2,2,i+1)
@@ -307,16 +353,21 @@ class NeuralNet :
         ax1.set_xlabel('Epoch')
 
         ax1.plot(self.history.history['mean_squared_error'], label = 'Training Loss')
-        ax1.plot(self.history.history['val_mean_squared_error'], label = 'Validation Loss')
+        try:
+            ax1.plot(self.history.history['val_mean_squared_error'], label = 'Validation Loss')
+        except KeyError:
+            pass
+
         ax1.set_xlim([0,len(self.history.history['mean_squared_error'])-1])
 
         ax3 = ax1.twinx()
-        ax3.semilogy(self.history.history['lr'], color = 'k', alpha = 0.4)
+        ax3.semilogy(self.history.history['lr'], color = 'k', alpha = 0.4, label = 'Learning Rate')
         ax3.set_ylabel('Learning Rate')
 
+        lns, labs   = ax1.get_legend_handles_labels()
+        lns2, labs2 = ax3.get_legend_handles_labels()
 
-
-        ax1.legend()
+        ax1.legend(lns+lns2, labs+labs2, loc = 1)
 
 
         ax2 = plt.subplot(1,2,2)
@@ -324,21 +375,26 @@ class NeuralNet :
         ax2.set_ylabel('MAE')
         ax2.set_xlabel('Epoch')
         ax2.plot(self.history.history['mean_absolute_error'], label = 'Training MAE')
-        ax2.plot(self.history.history['val_mean_absolute_error'], label = 'Validation MAE')
+
+        try:
+            ax2.plot(self.history.history['val_mean_absolute_error'], label = 'Validation MAE')
+        except KeyError:
+            pass
+
         ax2.set_xlim([0,len(self.history.history['mean_absolute_error'])-1])
 
         ax4 = ax2.twinx()
-        ax4.semilogy(self.history.history['lr'], color = 'k' , alpha = 0.4)
+        ax4.semilogy(self.history.history['lr'], color = 'k' , alpha = 0.4, label = 'Learning Rate')
         ax4.set_ylabel('Learning Rate')
-        ax2.legend()
+
+        lns, labs   = ax2.get_legend_handles_labels()
+        lns2, labs2 = ax4.get_legend_handles_labels()
+
+        ax2.legend(lns+lns2, labs+labs2, loc = 1)
+
+
 
         if (save_fig == 'yes'):
             fig1.savefig(path + self.model_datetime +'/loss.png', dpi = 100)
-
-        return
-
-
-
-    def save_best_network(self):
 
         return
