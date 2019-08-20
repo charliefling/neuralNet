@@ -3,12 +3,10 @@ import pandas as pd
 import scipy as scp
 import os
 import matplotlib.pyplot as plt
-
 from time import time
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
 from datetime import datetime
-
 from keras import models
 from keras import layers
 from keras import optimizers
@@ -16,15 +14,16 @@ from keras import initializers
 from keras import callbacks
 from keras import regularizers
 
-
 class NeuralNet :
 
-    def __init__(self, INPUT_DIM    = None, OUTPUT_DIM   = None, LOSS         = 'mse',
-                       HIDDEN_DIM_2 = None, HIDDEN_DIM_3 = None, HIDDEN_DIM_1 = None,
-                       BATCH_SIZE   = None, EPOCHS       = 1000, DROPOUT      = 0.2,
-                       ACTIVATION   = layers.ELU(alpha = 0.1),  LEARNING_RATE = 0.01,
-                       METRICS      = ['mae', 'mse'],            REGULARIZER  = None
-                       ):
+    def __init__(self, INPUT_DIM    = None,  OUTPUT_DIM   = None,
+                       HIDDEN_DIM_1 = None,  HIDDEN_DIM_2 = None,
+                       HIDDEN_DIM_3 = None,  HIDDEN_DIM_4 = None,
+                       LOSS         = 'mse', BATCH_SIZE   = None,
+                       EPOCHS       = 1000,  DROPOUT      = 0.0,
+                       ACTIVATION   = layers.ELU(alpha = 0.1),
+                       LEARNING_RATE = 0.01, METRICS      = ['mae', 'mse'],
+                       REGULARIZER  = None,  OPTIMIZER    = 'adam'):
 
 
         self.input_dim      = INPUT_DIM
@@ -32,6 +31,7 @@ class NeuralNet :
         self.hidden_dim_1   = HIDDEN_DIM_1
         self.hidden_dim_2   = HIDDEN_DIM_2
         self.hidden_dim_3   = HIDDEN_DIM_3
+        self.hidden_dim_4   = HIDDEN_DIM_4
 
         self.loss           = LOSS
         self.batch_size     = BATCH_SIZE
@@ -39,11 +39,13 @@ class NeuralNet :
         self.dropout        = DROPOUT
         self.activation     = ACTIVATION
         self.lr             = LEARNING_RATE
-        self.optimizer      = optimizers.adam(lr = self.lr)
+        self.optimizer      = OPTIMIZER
         self.metrics        = METRICS
-        self.model_datetime = datetime.now().strftime('%d-%mT%H-%M-%S')
+        self.model_datetime = datetime.now().strftime('%d-%mT%H-%M-%S.%f')
         self.data_used      = ''
         self.regularizers   = REGULARIZER
+
+
 
 
 
@@ -58,18 +60,18 @@ class NeuralNet :
         """
         self.model = models.Sequential()
 
-
+        '''
         if self.regularizers != None:
             self.model.add(layers.Dense(
                       self.hidden_dim_1, input_dim = self.input_dim,
                       kernel_initializer = initializers.glorot_normal(),
-                      bias_initializer   = initializers.Constant(0.0),
+                      bias_initializer   = initializers.Constant(0.1),
                       kernel_regularizer= self.regularizers))
-        else:
-            self.model.add(layers.Dense(
-                      self.hidden_dim_1, input_dim = self.input_dim,
-                      kernel_initializer = initializers.glorot_normal(),
-                      bias_initializer   = initializers.Constant(0.0)))
+        '''
+        self.model.add(layers.Dense(
+                  self.hidden_dim_1, input_dim = self.input_dim,
+                  kernel_initializer = initializers.glorot_normal(),
+                  bias_initializer   = initializers.Constant(0.1)))
 
 
         self.model.add(self.activation)
@@ -78,10 +80,10 @@ class NeuralNet :
 
         if self.hidden_dim_2 != None:
             if self.regularizers != None:
-                self.model.add(layers.Dense(self.hidden_dim_2, kernel_regularizer= self.regularizers))
+                self.model.add(layers.Dense(self.hidden_dim_2,
+                                activity_regularizer= self.regularizers))
             else:
                 self.model.add(layers.Dense(self.hidden_dim_2))
-
 
             self.model.add(self.activation)
             self.model.add(layers.Dropout(self.dropout))
@@ -90,24 +92,45 @@ class NeuralNet :
 
         if self.hidden_dim_3 != None:
             if self.regularizers != None:
-                self.model.add(layers.Dense(self.hidden_dim_3, kernel_regularizer =self.regularizers))
+                self.model.add(layers.Dense(self.hidden_dim_3,
+                                activity_regularizer =self.regularizers))
 
             else:
                 self.model.add(layers.Dense(self.hidden_dim_3))
-
 
             self.model.add(self.activation)
             self.model.add(layers.Dropout(self.dropout))
 
 
+        if self.hidden_dim_4 != None:
+            if self.regularizers != None:
+                self.model.add(layers.Dense(self.hidden_dim_4,
+                                activity_regularizer =self.regularizers))
+
+            else:
+                self.model.add(layers.Dense(self.hidden_dim_4))
+
+            self.model.add(self.activation)
+            self.model.add(layers.Dropout(self.dropout))
+
         self.model.add(layers.Dense(self.output_dim))
-        self.model.compile(loss = self.loss, optimizer = self.optimizer, metrics = self.metrics)
+
+
+        if self.optimizer == 'adam':
+            optimizer = optimizers.adam(lr = self.lr)
+
+        if self.optimizer == 'sgd':
+            optimizer = optimizers.SGD(lr = self.lr)
+        else:
+            optimizer = optimizers.adam(lr = self.lr)
+
+        self.model.compile(loss = self.loss, optimizer = optimizer, metrics = self.metrics)
 
 
 
         self.weights = self.model.get_weights()
-
         print('Model Created')
+
 
         return self.model
 
@@ -137,19 +160,18 @@ class NeuralNet :
 
         if reduce_lr == 1:
             reduce_lr = callbacks.ReduceLROnPlateau(monitor = 'val_loss',
-                                                    factor = 0.3, patience = 75,
+                                                    factor = 0.5, patience = 50,
                                                     min_lr = 10**-4)
             self.callbacks_list.append(reduce_lr)
 
         if early_stop == 1:
             early_stop = callbacks.EarlyStopping (monitor = 'val_loss',
-                                                  patience = 150,
+                                                  patience = 100,
                                                   restore_best_weights = True)
             self.callbacks_list.append(early_stop)
 
 
         if tensorboard == 1:
-
             if path != None:
                 path = path +'logs'
                 if not os.path.exists(path):
@@ -182,21 +204,22 @@ class NeuralNet :
         if (x_testing is None or y_testing is None):
             start = time()
             self.history = self.model.fit(x_training, y_training,
-                                epochs = self.epochs , batch_size = self.batch_size,
-                                verbose = verbose, callbacks = self.callbacks_list,
-                                shuffle = True
-                                )
-        else:
+                                          epochs = self.epochs ,
+                                          batch_size = self.batch_size,
+                                          verbose = verbose,
+                                          callbacks = self.callbacks_list,
+                                          shuffle = True)
 
+        else:
             start = time()
             self.history = self.model.fit(x_training, y_training,
-                                epochs = self.epochs , batch_size = self.batch_size,
-                                verbose = verbose, validation_data = (x_testing, y_testing),
-                                callbacks = self.callbacks_list, shuffle = True
-                                )
+                                          epochs = self.epochs ,
+                                          batch_size = self.batch_size,
+                                          verbose = verbose, validation_data = (x_testing, y_testing),
+                                          callbacks = self.callbacks_list,
+                                          shuffle = True)
 
         end = time()
-
         self.time_to_fit = end - start
 
         return
@@ -210,7 +233,6 @@ class NeuralNet :
         Returns trained model predicted outputs for given input array
 
 
-
         """
         self.expected_outputs    = y_testing
         self.accuracy            = self.model.evaluate(x_testing,y_testing)
@@ -221,10 +243,14 @@ class NeuralNet :
 
 
 
-    def save_best_network(self):
+    def save_best_network(self, path = ''):
         """
+        Saves network weights to be loaded into network for prediction
+        """
+        #self.model.save(path+'model.h5')
+        self.model.save_weights(path+self.model_datetime+'/model_weights.h5')
 
-        """
+
         return
 
 
@@ -249,9 +275,9 @@ class NeuralNet :
                 os.makedirs(path)
 
         np.savetxt(path + '/expected_outputs.txt', self.expected_outputs , delimiter = " ")
-        np.savetxt(path + '/predictions.txt',  self.predictions , delimiter = " ")
-        np.savetxt(path + '/loss.txt',         self.history.history['loss'] , delimiter = " ")
-        np.savetxt(path + '/val_loss.txt',     self.history.history['val_loss'] , delimiter = " ")
+        np.savetxt(path + '/predictions.txt',   self.predictions , delimiter = " ")
+        np.savetxt(path + '/mse.txt',          self.history.history['mean_squared_error'] , delimiter = " ")
+        np.savetxt(path + '/val_mse.txt',      self.history.history['val_mean_squared_error'] , delimiter = " ")
         np.savetxt(path + '/mae.txt',          self.history.history['mean_absolute_error'] , delimiter = " ")
         np.savetxt(path + '/val_mae.txt',      self.history.history['val_mean_absolute_error'] , delimiter = " ")
         np.savetxt(path + '/lr.txt',           self.history.history['lr'] , delimiter = " ")
@@ -265,6 +291,7 @@ class NeuralNet :
         file.write('  HIDDEN_DIM  : ' + str(self.hidden_dim_1) + '\n')
         file.write('HIDDEN_DIM_2  : ' + str(self.hidden_dim_2) + '\n')
         file.write('HIDDEN_DIM_3  : ' + str(self.hidden_dim_3) + '\n')
+        file.write('HIDDEN_DIM_4  : ' + str(self.hidden_dim_4) + '\n')
         file.write('     DROPOUT  : ' + str(self.dropout)      + '\n')
         file.write('  BATCH_SIZE  : ' + str(self.batch_size)   + '\n')
         file.write('      EPOCHS  : ' + str(len(self.history.history['loss']))+ '\n')
@@ -289,6 +316,9 @@ class NeuralNet :
         axis_x = [r'$\mathit{f}_{\ast,true}$', r'$V_{circ,true}$',r'$\mathit{f}_{X,true}$', r'$\tau_{CMB,true}$' ]
         axis_y = [r'$\mathit{f}_{\ast,pred}$', r'$V_{circ,pred}$',r'$\mathit{f}_{X,pred}$', r'$\tau_{CMB,pred}$' ]
 
+        #axis_x = [r'$\mathit{k1}_{true}$', r'$k2_{true}$',r'$\mathit{k3}_{true}$']
+        #axis_y = [r'$\mathit{k1}_{pred}$', r'$k2_{pred}$',r'$\mathit{k3}_{pred}$']
+
         fig = plt.figure(figsize = (800/50, 800/96), dpi = 96)
 
         for i in range(len(self.expected_outputs[0])):
@@ -298,7 +328,9 @@ class NeuralNet :
 
             ax = plt.subplot(2,2,i+1)
 
-            if (i == 1) or (i==0) or (i ==2) or (i ==3):
+            if (i == 1) or (i==0) or (i ==2): #or (i ==3):
+            #if (i ==3):
+
                 ax.loglog( x, y, '+')
 
                 ax.set_xlim(min(min(x) - 0.1*min(x), min(y) - 0.1*min(y)),
